@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ポケモン図鑑</title>
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --text: #1f2937; --sub: #6b7280;
+    --accent: #e3350d; --bar-bg: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111827; --card: #1f2937; --text: #f9fafb; --sub: #9ca3af; --bar-bg: #374151; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  h1 { text-align: center; margin: 0 0 16px; color: var(--accent); font-size: 28px; }
+  .search { display: flex; gap: 8px; margin-bottom: 8px; }
+  .search input {
+    flex: 1; min-width: 0; padding: 10px 12px; font-size: 16px;
+    border: 2px solid var(--bar-bg); border-radius: 10px; background: var(--card); color: var(--text);
+  }
+  button {
+    padding: 10px 14px; font-size: 15px; font-weight: bold; border: none; border-radius: 10px;
+    background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button:hover { opacity: .85; }
+  button.sub { background: var(--sub); }
+  .nav { display: flex; gap: 8px; justify-content: space-between; margin-bottom: 16px; }
+  .nav button { flex: 1; }
+  .hint { font-size: 12px; color: var(--sub); margin: 0 0 12px; }
+  .card { background: var(--card); border-radius: 20px; padding: 20px; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+  .no { color: var(--sub); font-weight: bold; }
+  .name { font-size: 28px; font-weight: bold; margin: 4px 0 0; }
+  .en { color: var(--sub); text-transform: capitalize; margin: 0 0 8px; }
+  .genus { color: var(--sub); font-size: 14px; }
+  .img-box { text-align: center; }
+  .img-box img { width: 220px; height: 220px; object-fit: contain; image-rendering: auto; }
+  .types { display: flex; gap: 8px; justify-content: center; margin: 8px 0 16px; }
+  .type { padding: 4px 14px; border-radius: 999px; color: #fff; font-size: 14px; font-weight: bold; }
+  .info { display: flex; justify-content: space-around; margin-bottom: 16px; text-align: center; }
+  .info b { display: block; font-size: 18px; }
+  .info span { font-size: 12px; color: var(--sub); }
+  .flavor { background: var(--bg); border-radius: 12px; padding: 12px; font-size: 14px; line-height: 1.7; margin-bottom: 16px; }
+  .stat { display: grid; grid-template-columns: 72px 36px 1fr; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }
+  .stat .v { text-align: right; font-weight: bold; }
+  .bar { height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .bar div { height: 100%; border-radius: 5px; transition: width .5s; }
+  .msg { text-align: center; color: var(--sub); padding: 40px 0; }
+  .shiny { font-size: 13px; color: var(--sub); text-align: center; cursor: pointer; user-select: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ポケモン図鑑</h1>
+  <div class="search">
+    <input id="q" type="text" placeholder="番号 or 英語名（例: 132, ditto）">
+    <button id="go">検索</button>
+    <button id="rand" class="sub">🎲</button>
+  </div>
+  <p class="hint">番号（1〜1025）か英語名で検索できます。🎲 でランダムに表示します。</p>
+  <div class="nav">
+    <button id="prev" class="sub">◀ 前</button>
+    <button id="next" class="sub">次 ▶</button>
+  </div>
+  <div id="result" class="card"><div class="msg">読み込み中…</div></div>
+</div>
+
+<script>
+const API = "https://pokeapi.co/api/v2";
+const MAX_ID = 1025;
+let currentId = 132;
+let shiny = false;
+let current = null;
+
+const TYPES = {
+  normal: ["ノーマル", "#9fa19f"], fire: ["ほのお", "#e62829"], water: ["みず", "#2980ef"],
+  electric: ["でんき", "#fac000"], grass: ["くさ", "#3fa129"], ice: ["こおり", "#3dcef3"],
+  fighting: ["かくとう", "#ff8000"], poison: ["どく", "#9141cb"], ground: ["じめん", "#915121"],
+  flying: ["ひこう", "#81b9ef"], psychic: ["エスパー", "#ef4179"], bug: ["むし", "#91a119"],
+  rock: ["いわ", "#afa981"], ghost: ["ゴースト", "#704170"], dragon: ["ドラゴン", "#5060e1"],
+  dark: ["あく", "#624d4e"], steel: ["はがね", "#60a1b8"], fairy: ["フェアリー", "#ef70ef"],
+};
+const STATS = {
+  hp: "HP", attack: "こうげき", defense: "ぼうぎょ",
+  "special-attack": "とくこう", "special-defense": "とくぼう", speed: "すばやさ",
+};
+
+const $ = (id) => document.getElementById(id);
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(res.status);
+  return res.json();
+}
+
+const ja = (list, key) => (list.find((x) => x.language.name === "ja-Hrkt") || list.find((x) => x.language.name === "ja") || {})[key];
+
+async function show(query) {
+  $("result").innerHTML = '<div class="msg">読み込み中…</div>';
+  try {
+    const p = await getJSON(`${API}/pokemon/${String(query).trim().toLowerCase()}`);
+    const s = await getJSON(p.species.url);
+    current = { p, s };
+    currentId = s.id;
+    render();
+  } catch (e) {
+    $("result").innerHTML = '<div class="msg">ポケモンが見つかりませんでした 😢</div>';
+  }
+}
+
+function render() {
+  const { p, s } = current;
+  const art = p.sprites.other["official-artwork"];
+  const img = (shiny ? art.front_shiny : art.front_default) || p.sprites.front_default;
+  const flavor = (ja(s.flavor_text_entries.slice().reverse(), "flavor_text") || "（説明文がありません）").replace(/\s+/g, " ");
+  const types = p.types.map(({ type }) => {
+    const [label, color] = TYPES[type.name] || [type.name, "#888"];
+    return `<span class="type" style="background:${color}">${label}</span>`;
+  }).join("");
+  const mainColor = (TYPES[p.types[0].type.name] || [, "#888"])[1];
+  const stats = p.stats.map((st) => `
+    <div class="stat">
+      <span>${STATS[st.stat.name] || st.stat.name}</span>
+      <span class="v">${st.base_stat}</span>
+      <div class="bar"><div style="width:${Math.min(st.base_stat / 200 * 100, 100)}%;background:${mainColor}"></div></div>
+    </div>`).join("");
+  const total = p.stats.reduce((a, st) => a + st.base_stat, 0);
+
+  $("result").innerHTML = `
+    <div class="no">No.${String(s.id).padStart(4, "0")}</div>
+    <div class="name">${ja(s.names, "name") || p.name}</div>
+    <div class="en">${p.name} <span class="genus">／ ${ja(s.genera, "genus") || ""}</span></div>
+    <div class="img-box"><img src="${img}" alt="${p.name}"></div>
+    <div class="shiny" id="shiny">${shiny ? "✨ 色違い表示中（タップで通常に）" : "タップで色違いを表示 ✨"}</div>
+    <div class="types">${types}</div>
+    <div class="info">
+      <div><b>${p.height / 10} m</b><span>たかさ</span></div>
+      <div><b>${p.weight / 10} kg</b><span>おもさ</span></div>
+      <div><b>${total}</b><span>合計種族値</span></div>
+    </div>
+    <div class="flavor">${flavor}</div>
+    ${stats}`;
+  $("shiny").onclick = () => { shiny = !shiny; render(); };
+}
+
+$("go").onclick = () => $("q").value && show($("q").value);
+$("q").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) $("go").click(); };
+$("rand").onclick = () => show(Math.floor(Math.random() * MAX_ID) + 1);
+$("prev").onclick = () => show(currentId > 1 ? currentId - 1 : MAX_ID);
+$("next").onclick = () => show(currentId < MAX_ID ? currentId + 1 : 1);
+
+show("ditto");
+</script>
+</body>
+</html>
